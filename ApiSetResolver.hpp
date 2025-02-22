@@ -25,6 +25,7 @@ struct ProcessEnvironmentBlock {
     ULONG SystemReserved;
     ULONG AtlThunkSListPtr32;
     PVOID ApiSetMap;
+    // [...]
 };
 
 struct ThreadEnvironmentBlock {
@@ -34,6 +35,7 @@ struct ThreadEnvironmentBlock {
     PVOID ActiveRpcHandle;
     PVOID ThreadLocalStoragePointer;
     ProcessEnvironmentBlock *ProcessEnvironmentBlock;
+    // [...]
 };
 
 static_assert(offsetof(ThreadEnvironmentBlock, ProcessEnvironmentBlock) == 0x60);
@@ -78,7 +80,7 @@ class ApiSetResolver {
     static DWORD CalculateHash(const PWSTR String, const DWORD Length, const DWORD HashMultiplier) {
         DWORD Hash = 0;
 
-        for (auto i = 0; i < Length; i++) {
+        for (DWORD i = 0; i < Length; i++) {
             Hash *= HashMultiplier;
             Hash += tolower(String[i]);
         }
@@ -101,6 +103,26 @@ class ApiSetResolver {
         return Length;
     }
 
+    static std::wstring ResolveHost(const uint64_t ApiSetNamespaceEntry, struct ApiSetNamespaceEntry *Entry) {
+        std::wstring ResolvedName;
+
+        for (auto i = 0; i < Entry->HostsNumber; i++) {
+            const auto HostEntry = GetValueEntry(ApiSetNamespaceEntry, Entry, i);
+            const auto Str = std::wstring(reinterpret_cast<PWCHAR>(ApiSetNamespaceEntry + HostEntry->ValueOffset),
+                                          HostEntry->ValueLength / sizeof(WCHAR));
+
+            ResolvedName = Str;
+        }
+
+        return ResolvedName;
+    }
+
+    static ApiSetValueEntry *GetValueEntry(const uint64_t ApiSetMapAddress, ApiSetNamespaceEntry *Entry,
+                                           const DWORD Index) {
+        return reinterpret_cast<ApiSetValueEntry *>(ApiSetMapAddress + Entry->ValueEntriesArrayOffset +
+                                                    Index * sizeof(ApiSetValueEntry));
+    }
+
 public:
     static std::string Resolve(const std::string &LibraryName) {
         // Convert library name to wide characters (all calculations are based on wchars)
@@ -114,14 +136,14 @@ public:
         const auto *Header = reinterpret_cast<const ApiSetHeader *>(ApiSetMapAddress);
 
         // Get length of library name without extension and last version digit
-        const auto NewLength = CutDllSuffix(WideLibraryNamePointer, WideLibraryName.length());
+        const auto NewLength = CutDllSuffix(WideLibraryNamePointer, static_cast<DWORD>(WideLibraryName.length()));
 
         // Calculate hash of api-set library name
         const auto Hash = CalculateHash(WideLibraryNamePointer, NewLength, Header->HashMultiplier);
 
         // ApiSet hash table is sorted in ascending order by hash value, so instead of looking up every single entry and
         // comparing it with our hash, we can use the binary search algorithm.
-        auto Low = 0;
+        auto Low = 0ULL;
         auto High = Header->Count - 1;
 
         while (Low <= High) {
@@ -137,13 +159,22 @@ public:
                         ApiSetMapAddress + Header->NamespaceEntriesOffset +
                         sizeof(struct ApiSetNamespaceEntry) * HashEntry->IndexInEntriesNamespace);
 
-                const auto *ValueEntry = reinterpret_cast<ApiSetValueEntry *>(ApiSetMapAddress +
-                                                                              NamespaceEntry->ValueEntriesArrayOffset);
+                std::wstring ResolvedLibraryWideName;
 
-                auto ResolvedLibraryWideName =
-                        std::wstring(reinterpret_cast<PWCHAR>(ApiSetMapAddress + ValueEntry->ValueOffset),
-                                     ValueEntry->ValueLength / sizeof(WCHAR));
-                auto ResolvedLibraryName = std::string(ResolvedLibraryWideName.begin(), ResolvedLibraryWideName.end());
+                if (NamespaceEntry->HostsNumber > 1) {
+                    ResolvedLibraryWideName =
+                            ResolveHost(ApiSetMapAddress, const_cast<ApiSetNamespaceEntry *>(NamespaceEntry));
+                } else {
+                    const auto *ValueEntry =
+                            GetValueEntry(ApiSetMapAddress, const_cast<ApiSetNamespaceEntry *>(NamespaceEntry), 0);
+
+                    ResolvedLibraryWideName =
+                            std::wstring(reinterpret_cast<PWCHAR>(ApiSetMapAddress + ValueEntry->ValueOffset),
+                                         ValueEntry->ValueLength / sizeof(WCHAR));
+                }
+
+                const auto ResolvedLibraryName =
+                        std::string(ResolvedLibraryWideName.begin(), ResolvedLibraryWideName.end());
 
                 return ResolvedLibraryName;
             }
