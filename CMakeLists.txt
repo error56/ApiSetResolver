@@ -1,8 +1,9 @@
-cmake_minimum_required(VERSION 3.30)
-project(api_set_resolver)
+cmake_minimum_required(VERSION 3.10)
+
+project(ApiSetResolver)
 
 set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(api_set_resolver INTERFACE ApiSetResolver.hpp)
-
-set_target_properties(api_set_resolver PROPERTIES LINKER_LANGUAGE CXX)
+add_library(ApiSetResolver ApiSetResolver.cpp)
+target_include_directories(ApiSetResolver PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
