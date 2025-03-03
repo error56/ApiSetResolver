@@ -1,0 +1,3 @@
+C:/Projects/ApiSetResolver/build/CMakeFiles/ApiSetResolver.dir
+C:/Projects/ApiSetResolver/build/CMakeFiles/edit_cache.dir
+C:/Projects/ApiSetResolver/build/CMakeFiles/rebuild_cache.dir
